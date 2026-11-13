@@ -3,7 +3,7 @@ version: "3.8"
 services:
   bank_simulator:
     container_name: bank_simulator
-    image: bbyars/mountebank:2.8.1
+    image: docker.xuanyuan.run/bbyars/mountebank:beta
     ports:
       - "2525:2525"
       - "8080:8080"

@@ -1,0 +1,474 @@
+openapi: 3.0.3
+info:
+  title: Payment Gateway API
+  version: 1.1.0
+  description: |
+    Public merchant API for creating and retrieving card or wallet payments.
+    Connector routing uses the challenge-specific bankId field in the request body.
+security:
+  - basicAuth: []
+paths:
+  /payments:
+    post:
+      tags:
+        - Payments
+      operationId: createPayment
+      summary: Process a payment
+      security:
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment processed (Authorized or Declined)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '401':
+          description: Missing or invalid Basic token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Validation failed or malformed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: requestKey conflict or a duplicate request is still in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Unexpected gateway failure or timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Acquiring bank integration error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Acquiring bank unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /payment/{id}:
+    get:
+      tags:
+        - Payments
+      operationId: getPayment
+      summary: Retrieve a payment by payment id
+      security:
+        - basicAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Stored payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '401':
+          description: Missing or invalid Basic token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+  schemas:
+    CreatePaymentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - requestKey
+        - bankId
+        - source
+        - amount
+      properties:
+        bankId:
+          $ref: '#/components/schemas/BankId'
+        source:
+          $ref: '#/components/schemas/Source'
+        amount:
+          $ref: '#/components/schemas/Amount'
+        softDescriptor:
+          type: string
+          maxLength: 22
+          example: ORD-5023-4E89
+        merchantAccount:
+          $ref: '#/components/schemas/MerchantAccount'
+        paymentContext:
+          $ref: '#/components/schemas/PaymentContext'
+        requestKey:
+          type: string
+          format: uuid
+          description: >-
+            Client-generated UUID used as the idempotency key. Reuse it only when retrying the
+            same payment payload. A different payload with the same key is rejected with 409.
+
+    Source:
+      type: object
+      oneOf:
+        - $ref: '#/components/schemas/CardSource'
+        - $ref: '#/components/schemas/WalletSource'
+      discriminator:
+        propertyName: type
+        mapping:
+          CREDIT_CARD: '#/components/schemas/CardSource'
+          WALLET: '#/components/schemas/WalletSource'
+
+    CardSource:
+      type: object
+      required:
+        - type
+        - number
+        - expiryMonth
+        - expiryYear
+        - cvv
+      properties:
+        type:
+          type: string
+          pattern: '^CREDIT_CARD$'
+        brand:
+          type: string
+          example: VISA
+        number:
+          type: string
+          pattern: '^[0-9]{14,19}$'
+          example: '4543474002249996'
+        expiryMonth:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 12
+          example: 6
+        expiryYear:
+          type: integer
+          format: int32
+          minimum: 1000
+          maximum: 9999
+          example: 2030
+        name:
+          type: string
+          example: Bruce Wayne
+        cvv:
+          type: string
+          pattern: '^[0-9]{3,4}$'
+          example: '956'
+        billingAddress:
+          $ref: '#/components/schemas/BillingAddress'
+        phone:
+          $ref: '#/components/schemas/Phone'
+        accountHolder:
+          $ref: '#/components/schemas/AccountHolder'
+
+    WalletSource:
+      type: object
+      required:
+        - type
+        - token
+      properties:
+        type:
+          type: string
+          pattern: '^WALLET$'
+        walletType:
+          type: string
+          enum:
+            - APPLEPAY
+            - GOOGLEPAY
+            - PAYPAL
+          example: APPLEPAY
+        token:
+          type: string
+          minLength: 1
+          description: Wallet provider token.
+          example: wallet-token-value
+        billingAddress:
+          $ref: '#/components/schemas/BillingAddress'
+        phone:
+          $ref: '#/components/schemas/Phone'
+
+    Amount:
+      type: object
+      required:
+        - value
+        - currency
+      properties:
+        value:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Amount in the minor currency unit.
+          example: 6540
+        currency:
+          type: string
+          pattern: '^(GBP|USD|EUR)$'
+          description: Supported currency codes; at most three allowed values (GBP, USD, EUR).
+          example: USD
+    BillingAddress:
+      type: object
+      properties:
+        addressLine1:
+          type: string
+        addressLine2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        country:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+
+    Phone:
+      type: object
+      properties:
+        countryCode:
+          type: string
+          example: '+1'
+        number:
+          type: string
+          example: '4155552671'
+
+    AccountHolder:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - individual
+            - corporate
+        firstName:
+          type: string
+        lastName:
+          type: string
+        companyName:
+          type: string
+
+    MerchantAccount:
+      type: object
+      required:
+        - type
+        - value
+      properties:
+        type:
+          type: string
+          enum:
+            - MERCHANT_ACCOUNT_REF
+        value:
+          type: string
+          minLength: 1
+
+    PaymentContext:
+      type: object
+      properties:
+        captureMode:
+          type: string
+          enum:
+            - SINGLE
+            - AUTOMATIC
+            - MANUAL
+        transactionInitiatorType:
+          type: string
+          enum:
+            - CUSTOMER
+            - MERCHANT
+        processing:
+          $ref: '#/components/schemas/Processing'
+
+    Processing:
+      type: object
+      oneOf:
+        - $ref: '#/components/schemas/CardProcessing'
+        - $ref: '#/components/schemas/WalletProcessing'
+      discriminator:
+        propertyName: schema
+        mapping:
+          CardProcessing: '#/components/schemas/CardProcessing'
+          WalletProcessing: '#/components/schemas/WalletProcessing'
+
+    CardProcessing:
+      type: object
+      required:
+        - schema
+      properties:
+        schema:
+          type: string
+          pattern: '^CardProcessing$'
+        routingNetwork:
+          type: string
+          example: CARTES_BANCAIRES
+
+    WalletProcessing:
+      type: object
+      required:
+        - schema
+      properties:
+        schema:
+          type: string
+          pattern: '^WalletProcessing$'
+        walletType:
+          type: string
+          enum:
+            - APPLEPAY
+            - GOOGLEPAY
+            - PAYPAL
+
+    PaymentStatus:
+      type: string
+      enum:
+        - Rejected
+        - Authorized
+        - Declined
+    BankId:
+      type: string
+      description: Challenge-specific connector routing id.
+      enum:
+        - bank-simulator
+    PaymentResponse:
+      type: object
+      required:
+        - id
+        - amount
+        - bankId
+        - status
+        - source
+        - processedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        amount:
+          $ref: '#/components/schemas/Amount'
+        bankId:
+          $ref: '#/components/schemas/BankId'
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        source:
+          $ref: '#/components/schemas/PaymentSource'
+        processedOn:
+          type: string
+          format: date-time
+        processing:
+          $ref: '#/components/schemas/PaymentProcessing'
+
+    PaymentSource:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - CREDIT_CARD
+            - WALLET
+        brand:
+          type: string
+          example: VISA
+        number:
+          type: string
+          pattern: '^\*{4} \*{4} \*{4} [0-9]{4}$'
+          description: Masked card number containing only the final four digits.
+          example: '**** **** **** 9996'
+        cardNumberLastFour:
+          type: string
+          pattern: '^[0-9]{4}$'
+        expiryMonth:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 12
+        expiryYear:
+          type: integer
+          format: int32
+          minimum: 1000
+          maximum: 9999
+        walletType:
+          type: string
+          enum:
+            - APPLEPAY
+            - GOOGLEPAY
+            - PAYPAL
+
+    PaymentProcessing:
+      type: object
+      properties:
+        authCode:
+          type: string
+        acquirerReferenceNumber:
+          type: string
+        acquirerAuthReference:
+          type: string
+        retrievalReferenceNumber:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - id
+        - status
+        - code
+        - message
+        - errors
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique error id for debugging and support correlation.
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        timestamp:
+          type: string
+          format: date-time
+        code:
+          type: string
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldViolation'
+
+    FieldViolation:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+        message:
+          type: string

@@ -1,0 +1,57 @@
+openapi: 3.0.3
+info:
+  title: Bank Simulator API
+  version: 1.0.0
+  description: Acquiring bank simulator contract used by connector-bank.
+paths:
+  /payments:
+    post:
+      operationId: authorizePayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BankPaymentRequest'
+      responses:
+        '200':
+          description: Authorization result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BankPaymentResponse'
+        '400':
+          description: Missing or invalid request
+        '503':
+          description: Bank unavailable
+components:
+  schemas:
+    BankPaymentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - card_number
+        - expiry_date
+        - currency
+        - amount
+        - cvv
+      properties:
+        card_number:
+          type: string
+        expiry_date:
+          type: string
+          description: MM/YYYY
+        currency:
+          type: string
+        amount:
+          type: integer
+          format: int32
+        cvv:
+          type: string
+    BankPaymentResponse:
+      type: object
+      properties:
+        authorized:
+          type: boolean
+        authorization_code:
+          type: string
