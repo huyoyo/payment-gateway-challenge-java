@@ -5,8 +5,6 @@ info:
   description: |
     Public merchant API for creating and retrieving card or wallet payments.
     Connector routing uses the challenge-specific bankId field in the request body.
-security:
-  - basicAuth: []
 paths:
   /payments:
     post:
@@ -14,8 +12,6 @@ paths:
         - Payments
       operationId: createPayment
       summary: Process a payment
-      security:
-        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -29,12 +25,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaymentResponse'
-        '401':
-          description: Missing or invalid Basic token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '400':
           description: Validation failed or malformed request
           content:
@@ -71,8 +61,6 @@ paths:
         - Payments
       operationId: getPayment
       summary: Retrieve a payment by payment id
-      security:
-        - basicAuth: []
       parameters:
         - name: id
           in: path
@@ -87,12 +75,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaymentResponse'
-        '401':
-          description: Missing or invalid Basic token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Payment not found
           content:
@@ -100,10 +82,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 components:
-  securitySchemes:
-    basicAuth:
-      type: http
-      scheme: basic
   schemas:
     CreatePaymentRequest:
       type: object
@@ -124,8 +102,6 @@ components:
           type: string
           maxLength: 22
           example: ORD-5023-4E89
-        merchantAccount:
-          $ref: '#/components/schemas/MerchantAccount'
         paymentContext:
           $ref: '#/components/schemas/PaymentContext'
         requestKey:
@@ -277,21 +253,6 @@ components:
           type: string
         companyName:
           type: string
-
-    MerchantAccount:
-      type: object
-      required:
-        - type
-        - value
-      properties:
-        type:
-          type: string
-          enum:
-            - MERCHANT_ACCOUNT_REF
-        value:
-          type: string
-          minLength: 1
-
     PaymentContext:
       type: object
       properties:

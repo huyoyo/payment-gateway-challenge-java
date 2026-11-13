@@ -33,6 +33,11 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
   </dependencies>
 
   <build>
@@ -51,8 +56,8 @@
               <inputSpec>${project.basedir}/src/main/resources/openapi/payment-gateway.yaml</inputSpec>
               <generatorName>spring</generatorName>
               <output>${project.build.directory}/generated-sources/openapi</output>
-              <apiPackage>com.checkout.payment.gateway.app.api.generated</apiPackage>
-              <modelPackage>com.checkout.payment.gateway.app.api.generated.model</modelPackage>
+              <apiPackage>com.checkout.payment.gateway.app.payment.api.generated</apiPackage>
+              <modelPackage>com.checkout.payment.gateway.app.payment.api.generated.model</modelPackage>
               <generateApiTests>false</generateApiTests>
               <generateModelTests>false</generateModelTests>
               <generateApiDocumentation>false</generateApiDocumentation>
