@@ -81,8 +81,8 @@ public class GlobalExceptionHandler {
   public ResponseEntity<ApiErrorResponse> handleBankUnavailable(BankUnavailableException ex) {
     LOG.warn("Acquiring bank unavailable: {}", ex.getMessage());
     return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-        .body(errorResponseBuilder.error("ACQUIRING_BANK_UNAVAILABLE",
-            "Acquiring bank is currently unavailable; please retry later"));
+        .body(errorResponseBuilder.unknown("ACQUIRING_BANK_UNAVAILABLE",
+            "Acquiring bank did not return a definitive outcome; retry or reconcile"));
   }
 
   @ExceptionHandler(BankIntegrationException.class)
@@ -90,7 +90,7 @@ public class GlobalExceptionHandler {
     // Do not log stack traces: an upstream response could echo card data.
     LOG.error("Acquiring bank integration error: {}", ex.getMessage());
     return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-        .body(errorResponseBuilder.error("ACQUIRING_BANK_ERROR",
+        .body(errorResponseBuilder.unknown("ACQUIRING_BANK_ERROR",
             "Acquiring bank could not process the request"));
   }
 
@@ -125,6 +125,6 @@ public class GlobalExceptionHandler {
   public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception ex) {
     LOG.error("Unexpected error while processing request", ex);
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-        .body(errorResponseBuilder.error("INTERNAL_ERROR", "An unexpected error occurred"));
+        .body(errorResponseBuilder.unknown("INTERNAL_ERROR", "An unexpected error occurred"));
   }
 }

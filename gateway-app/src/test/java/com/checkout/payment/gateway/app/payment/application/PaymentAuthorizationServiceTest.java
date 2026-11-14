@@ -14,6 +14,7 @@ import com.checkout.payment.gateway.app.payment.api.generated.model.CardSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.CreatePaymentRequest;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentStatus;
+import com.checkout.payment.gateway.app.payment.observability.PaymentMetrics;
 import com.checkout.payment.gateway.app.payment.routing.PaymentsConnectorRegistry;
 import com.checkout.payment.gateway.app.payment.persistence.CardDataProtector;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentPersistenceMapper;
@@ -22,6 +23,7 @@ import com.checkout.payment.gateway.app.payment.persistence.StoredPayment;
 import com.checkout.payment.gateway.connector.api.IPaymentProcessor;
 import com.checkout.payment.gateway.connector.api.PaymentCommand;
 import com.checkout.payment.gateway.connector.api.PaymentOutcome;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -47,13 +49,14 @@ class PaymentAuthorizationServiceTest {
   private IPaymentProcessor processor;
   @Mock
   private PaymentRepository paymentRepository;
-  @Mock
-  private Clock clock;
   @Spy
   private PaymentResponseBuilder commonResponseBuilder = new PaymentResponseBuilder();
   @Spy
-  private CreatePaymentResponseBuilder responseBuilder =
-      new CreatePaymentResponseBuilder(commonResponseBuilder);
+  private CreatePaymentResponseBuilder responseBuilder = new CreatePaymentResponseBuilder(
+      commonResponseBuilder, Clock.fixed(NOW, ZoneOffset.UTC));
+  private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+  @Spy
+  private PaymentMetrics paymentMetrics = new PaymentMetrics(meterRegistry);
   @Spy
   private CardDataProtector cardDataProtector = new CardDataProtector();
   @Spy
@@ -67,17 +70,18 @@ class PaymentAuthorizationServiceTest {
     CreatePaymentRequest request = request();
     when(connectorRegistry.get(BankId.BANK_SIMULATOR)).thenReturn(processor);
     when(processor.performPayments(COMMAND)).thenReturn(new PaymentOutcome(true, "auth-123"));
-    when(clock.instant()).thenReturn(NOW);
 
     PaymentResponse payment = authorizationService.authorize(request, COMMAND);
 
+    CardSource source = (CardSource) payment.getSource();
     assertThat(payment.getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
-    assertThat(payment.getSource().getNumber()).isNull();
-    assertThat(payment.getSource().getCardNumberLastFour()).isEqualTo("8877");
+    assertThat(source.getNumber()).isNull();
+    assertThat(source.getLastFour()).isEqualTo("8877");
     assertThat(payment.getProcessing().getAuthCode()).isEqualTo("auth-123");
     assertThat(payment.getProcessedOn())
         .isEqualTo(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
     verify(paymentRepository).save(any(StoredPayment.class));
+    assertThat(meterRegistry.get("payments.created").counter().count()).isEqualTo(1.0);
   }
 
   @Test
@@ -85,7 +89,6 @@ class PaymentAuthorizationServiceTest {
     CreatePaymentRequest request = request();
     when(connectorRegistry.get(BankId.BANK_SIMULATOR)).thenReturn(processor);
     when(processor.performPayments(COMMAND)).thenReturn(new PaymentOutcome(false, ""));
-    when(clock.instant()).thenReturn(NOW);
 
     PaymentResponse payment = authorizationService.authorize(request, COMMAND);
 
@@ -105,18 +108,21 @@ class PaymentAuthorizationServiceTest {
             () -> authorizationService.authorize(request, COMMAND))
         .isInstanceOf(com.checkout.payment.gateway.connector.api.BankUnavailableException.class);
     verify(paymentRepository, never()).save(any());
+    assertThat(meterRegistry.get("payment.authorization.duration")
+        .tag("status", "error").timer().count()).isEqualTo(1);
   }
 
   @Test
   void removesMaskedNumberForPostReplay() {
     PaymentResponse stored = new PaymentResponse();
-    stored.setSource(new com.checkout.payment.gateway.app.payment.api.generated.model.PaymentSource());
-    stored.getSource().setNumber("**** **** **** 8877");
+    CardSource source = new CardSource("CREDIT_CARD", "2222405343248877", 12, 2099, "123");
+    source.setNumber("**** **** **** 8877");
+    stored.setSource(source);
 
     PaymentResponse replay = authorizationService.normalizeReplay(stored);
 
     assertThat(replay).isSameAs(stored);
-    assertThat(replay.getSource().getNumber()).isNull();
+    assertThat(source.getNumber()).isNull();
   }
 
   private static CreatePaymentRequest request() {

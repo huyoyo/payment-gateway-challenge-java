@@ -6,9 +6,9 @@ import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentRespo
 import com.checkout.payment.gateway.app.payment.application.PaymentCreationService;
 import com.checkout.payment.gateway.app.payment.application.PaymentQueryService;
 import jakarta.validation.Valid;
-import java.net.URI;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,9 +25,7 @@ public class PaymentController implements PaymentsApi {
   public ResponseEntity<PaymentResponse> createPayment(
       @Valid @RequestBody CreatePaymentRequest request) {
     PaymentResponse payment = paymentCreationService.perform(request);
-    return ResponseEntity
-        .created(URI.create("/payment/" + payment.getId()))
-        .body(payment);
+    return ResponseEntity.status(HttpStatus.CREATED).body(payment);
   }
 
   @Override

@@ -8,5 +8,5 @@ import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentRespo
 public record PaymentRecord(
     PaymentResponse payment,
     String maskedCardNumber,
-    String cardNumberLastFour) {
+    String lastFour) {
 }

@@ -14,6 +14,6 @@ public class OpenApiConfiguration {
         .title("Payment Gateway API")
         .description("Accepts card payments, routes them to the connector selected by the body "
             + "bankId field and exposes stored payment details for reconciliation.")
-        .version("v1"));
+        .version("1.1.0"));
   }
 }

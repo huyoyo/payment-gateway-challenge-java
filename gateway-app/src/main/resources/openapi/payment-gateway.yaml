@@ -3,7 +3,7 @@ info:
   title: Payment Gateway API
   version: 1.1.0
   description: |
-    Public merchant API for creating and retrieving card or wallet payments.
+    Public merchant API for creating and retrieving card payments.
     Connector routing uses the challenge-specific bankId field in the request body.
 paths:
   /payments:
@@ -49,12 +49,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                bankIntegrationError:
+                  summary: Bank returned a non-definitive integration failure
+                  value:
+                    id: 5f1d7d5e-8c4c-4a0f-9f55-2f0f8d1b2c10
+                    status: Unknown
+                    timestamp: '2026-11-18T08:00:00Z'
+                    code: ACQUIRING_BANK_ERROR
+                    message: Acquiring bank could not process the request
+                    errors: []
         '503':
           description: Acquiring bank unavailable
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                bankUnavailable:
+                  summary: Bank unavailable with an unknown authorization outcome
+                  value:
+                    id: 2b7f0a63-1a5e-4f6c-9a64-8d0e3f2c4b11
+                    status: Unknown
+                    timestamp: '2026-11-18T08:00:00Z'
+                    code: ACQUIRING_BANK_UNAVAILABLE
+                    message: Acquiring bank did not return a definitive outcome; retry or reconcile
+                    errors: []
   /payment/{id}:
     get:
       tags:
@@ -115,12 +135,10 @@ components:
       type: object
       oneOf:
         - $ref: '#/components/schemas/CardSource'
-        - $ref: '#/components/schemas/WalletSource'
       discriminator:
         propertyName: type
         mapping:
           CREDIT_CARD: '#/components/schemas/CardSource'
-          WALLET: '#/components/schemas/WalletSource'
 
     CardSource:
       type: object
@@ -160,39 +178,15 @@ components:
           type: string
           pattern: '^[0-9]{3,4}$'
           example: '956'
+        lastFour:
+          type: string
+          pattern: '^[0-9]{4}$'
+          description: Last four digits of the card number.
+          example: '9996'
         billingAddress:
           $ref: '#/components/schemas/BillingAddress'
-        phone:
-          $ref: '#/components/schemas/Phone'
         accountHolder:
           $ref: '#/components/schemas/AccountHolder'
-
-    WalletSource:
-      type: object
-      required:
-        - type
-        - token
-      properties:
-        type:
-          type: string
-          pattern: '^WALLET$'
-        walletType:
-          type: string
-          enum:
-            - APPLEPAY
-            - GOOGLEPAY
-            - PAYPAL
-          example: APPLEPAY
-        token:
-          type: string
-          minLength: 1
-          description: Wallet provider token.
-          example: wallet-token-value
-        billingAddress:
-          $ref: '#/components/schemas/BillingAddress'
-        phone:
-          $ref: '#/components/schemas/Phone'
-
     Amount:
       type: object
       required:
@@ -226,17 +220,6 @@ components:
         country:
           type: string
           pattern: '^[A-Za-z]{2}$'
-
-    Phone:
-      type: object
-      properties:
-        countryCode:
-          type: string
-          example: '+1'
-        number:
-          type: string
-          example: '4155552671'
-
     AccountHolder:
       type: object
       required:
@@ -274,12 +257,10 @@ components:
       type: object
       oneOf:
         - $ref: '#/components/schemas/CardProcessing'
-        - $ref: '#/components/schemas/WalletProcessing'
       discriminator:
         propertyName: schema
         mapping:
           CardProcessing: '#/components/schemas/CardProcessing'
-          WalletProcessing: '#/components/schemas/WalletProcessing'
 
     CardProcessing:
       type: object
@@ -292,28 +273,13 @@ components:
         routingNetwork:
           type: string
           example: CARTES_BANCAIRES
-
-    WalletProcessing:
-      type: object
-      required:
-        - schema
-      properties:
-        schema:
-          type: string
-          pattern: '^WalletProcessing$'
-        walletType:
-          type: string
-          enum:
-            - APPLEPAY
-            - GOOGLEPAY
-            - PAYPAL
-
     PaymentStatus:
       type: string
       enum:
-        - Rejected
         - Authorized
         - Declined
+        - Rejected
+        - Unknown
     BankId:
       type: string
       description: Challenge-specific connector routing id.
@@ -339,51 +305,12 @@ components:
         status:
           $ref: '#/components/schemas/PaymentStatus'
         source:
-          $ref: '#/components/schemas/PaymentSource'
+          $ref: '#/components/schemas/Source'
         processedOn:
           type: string
           format: date-time
         processing:
           $ref: '#/components/schemas/PaymentProcessing'
-
-    PaymentSource:
-      type: object
-      required:
-        - type
-      properties:
-        type:
-          type: string
-          enum:
-            - CREDIT_CARD
-            - WALLET
-        brand:
-          type: string
-          example: VISA
-        number:
-          type: string
-          pattern: '^\*{4} \*{4} \*{4} [0-9]{4}$'
-          description: Masked card number containing only the final four digits.
-          example: '**** **** **** 9996'
-        cardNumberLastFour:
-          type: string
-          pattern: '^[0-9]{4}$'
-        expiryMonth:
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 12
-        expiryYear:
-          type: integer
-          format: int32
-          minimum: 1000
-          maximum: 9999
-        walletType:
-          type: string
-          enum:
-            - APPLEPAY
-            - GOOGLEPAY
-            - PAYPAL
-
     PaymentProcessing:
       type: object
       properties:
@@ -395,7 +322,6 @@ components:
           type: string
         retrievalReferenceNumber:
           type: string
-
     ErrorResponse:
       type: object
       required:

@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.checkout.payment.gateway.app.payment.api.generated.model.Amount;
 import com.checkout.payment.gateway.app.payment.api.generated.model.BankId;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
-import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentSource;
+import com.checkout.payment.gateway.app.payment.api.generated.model.CardSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentStatus;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentPersistenceMapper;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentRepository;
@@ -103,12 +103,28 @@ class PaymentGatewayIT {
   }
 
   @Test
+  void exposesActuatorMetricsAndPrometheusEndpoint() throws Exception {
+    mvc.perform(post("/payments")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(validPaymentJson("bank-simulator")))
+        .andExpect(status().isCreated());
+
+    mvc.perform(get("/actuator/metrics"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.names").isArray());
+
+    mvc.perform(get("/actuator/prometheus"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("payments_created_total")));
+  }
+
+  @Test
   void createsAuthorizedPaymentAndRetrievesIt() throws Exception {
     MvcResult result = mvc.perform(post("/payments")
             .contentType(MediaType.APPLICATION_JSON)
             .content(validPaymentJson("bank-simulator")))
         .andExpect(status().isCreated())
-        .andExpect(header().exists("Location"))
+        .andExpect(header().doesNotExist("Location"))
         .andExpect(header().exists("X-Request-Id"))
         .andExpect(jsonPath("$.id").isNotEmpty())
         .andExpect(jsonPath("$.bankId").value("bank-simulator"))
@@ -117,7 +133,7 @@ class PaymentGatewayIT {
         .andExpect(jsonPath("$.amount.currency").value("USD"))
         .andExpect(jsonPath("$.source.type").value("CREDIT_CARD"))
         .andExpect(jsonPath("$.source.number").doesNotExist())
-        .andExpect(jsonPath("$.source.cardNumberLastFour").value("9996"))
+        .andExpect(jsonPath("$.source.lastFour").value("9996"))
         .andExpect(jsonPath("$.source.expiryMonth").value(6))
         .andExpect(jsonPath("$.source.expiryYear").value(2030))
         .andExpect(jsonPath("$.processedOn").isNotEmpty())
@@ -125,18 +141,18 @@ class PaymentGatewayIT {
         .andReturn();
 
     String paymentId = JsonPath.read(result.getResponse().getContentAsString(), "$.id");
-    String location = result.getResponse().getHeader("Location");
-    mvc.perform(get(location))
+    String paymentUrl = "/payment/" + paymentId;
+    mvc.perform(get(paymentUrl))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.bankId").value("bank-simulator"))
         .andExpect(jsonPath("$.status").value("Authorized"))
         .andExpect(jsonPath("$.source.number").value("**** **** **** 9996"))
-        .andExpect(jsonPath("$.source.cardNumberLastFour").value("9996"))
+        .andExpect(jsonPath("$.source.lastFour").value("9996"))
         .andExpect(jsonPath("$.amount.value").value(6540))
         .andExpect(jsonPath("$.processing.authCode").value("auth-123"));
 
     // A second GET must return the same persisted processing details.
-    mvc.perform(get(location))
+    mvc.perform(get(paymentUrl))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.id").value(paymentId))
         .andExpect(jsonPath("$.processing.authCode").value("auth-123"));
@@ -233,20 +249,6 @@ class PaymentGatewayIT {
   }
 
   @Test
-  void parsesWalletAndWalletProcessingButRejectsUnsupportedSource() throws Exception {
-    mvc.perform(post("/payments")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(walletPaymentJson()))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("PAYMENT_REJECTED"))
-        .andExpect(jsonPath("$.id").isNotEmpty())
-        .andExpect(jsonPath("$.status").value("Rejected"))
-        .andExpect(jsonPath("$.errors[*].field").value(containsInAnyOrder("source.type")));
-
-    org.assertj.core.api.Assertions.assertThat(BANK_REQUESTS).hasValue(0);
-  }
-
-  @Test
   void rejectsNonIntegerAmountInsteadOfTruncatingIt() throws Exception {
     mvc.perform(post("/payments")
             .contentType(MediaType.APPLICATION_JSON)
@@ -311,7 +313,7 @@ class PaymentGatewayIT {
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.code").value("ACQUIRING_BANK_UNAVAILABLE"))
         .andExpect(jsonPath("$.id").isNotEmpty())
-        .andExpect(jsonPath("$.status").value("Rejected"));
+        .andExpect(jsonPath("$.status").value("Unknown"));
   }
 
   @Test
@@ -325,7 +327,7 @@ class PaymentGatewayIT {
         .andExpect(status().isBadGateway())
         .andExpect(jsonPath("$.code").value("ACQUIRING_BANK_ERROR"))
         .andExpect(jsonPath("$.id").isNotEmpty())
-        .andExpect(jsonPath("$.status").value("Rejected"));
+        .andExpect(jsonPath("$.status").value("Unknown"));
   }
 
   @Test
@@ -370,7 +372,7 @@ class PaymentGatewayIT {
             .content(body))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.source.number").doesNotExist())
-        .andExpect(jsonPath("$.source.cardNumberLastFour").value("9996"));
+        .andExpect(jsonPath("$.source.lastFour").value("9996"));
 
     org.assertj.core.api.Assertions.assertThat(BANK_REQUESTS).hasValue(1);
   }
@@ -406,14 +408,14 @@ class PaymentGatewayIT {
             .content(body))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.code").value("ACQUIRING_BANK_UNAVAILABLE"))
-        .andExpect(jsonPath("$.status").value("Rejected"));
+        .andExpect(jsonPath("$.status").value("Unknown"));
 
     mvc.perform(post("/payments")
             .contentType(MediaType.APPLICATION_JSON)
             .content(body))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.code").value("ACQUIRING_BANK_UNAVAILABLE"))
-        .andExpect(jsonPath("$.status").value("Rejected"));
+        .andExpect(jsonPath("$.status").value("Unknown"));
 
     org.assertj.core.api.Assertions.assertThat(BANK_REQUESTS).hasValue(1);
   }
@@ -449,9 +451,9 @@ class PaymentGatewayIT {
     payment.setBankId(BankId.BANK_SIMULATOR);
     payment.setStatus(PaymentStatus.DECLINED);
     payment.setAmount(new Amount(250, "USD"));
-    PaymentSource source = new PaymentSource();
-    source.setType(PaymentSource.TypeEnum.CREDIT_CARD);
-    source.setCardNumberLastFour("4242");
+    CardSource source = new CardSource();
+    source.setType("CREDIT_CARD");
+    source.setLastFour("4242");
     source.setExpiryMonth(1);
     source.setExpiryYear(2030);
     payment.setSource(source);
@@ -465,7 +467,7 @@ class PaymentGatewayIT {
         .andExpect(jsonPath("$.bankId").value("bank-simulator"))
         .andExpect(jsonPath("$.status").value("Declined"))
         .andExpect(jsonPath("$.source.number").value("**** **** **** 4242"))
-        .andExpect(jsonPath("$.source.cardNumberLastFour").value("4242"))
+        .andExpect(jsonPath("$.source.lastFour").value("4242"))
         .andExpect(jsonPath("$.amount.value").value(250));
   }
 
@@ -546,7 +548,6 @@ class PaymentGatewayIT {
               "zip": "SW1A 1AA",
               "country": "GB"
             },
-            "phone": { "countryCode": "+1", "number": "4155552671" },
             "accountHolder": {
               "type": "individual",
               "firstName": "Toby",
@@ -601,23 +602,4 @@ class PaymentGatewayIT {
         """.formatted(UUID.randomUUID());
   }
 
-  private static String walletPaymentJson() {
-    return """
-        {
-          "bankId": "bank-simulator",
-          "requestKey": "%s",
-          "source": {
-            "type": "WALLET",
-            "walletType": "APPLEPAY",
-            "token": "wallet-token"
-          },
-          "amount": { "value": 100, "currency": "GBP" },
-          "paymentContext": {
-            "captureMode": "SINGLE",
-            "transactionInitiatorType": "CUSTOMER",
-            "processing": { "schema": "WalletProcessing", "walletType": "APPLEPAY" }
-          }
-        }
-        """.formatted(UUID.randomUUID());
-  }
 }

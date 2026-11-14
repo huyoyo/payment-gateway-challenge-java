@@ -27,6 +27,6 @@ class PaymentPersistenceMapperTest {
     assertThat(stored.payment()).isSameAs(payment);
     PaymentRecord record = mapper.toRecord(stored);
     assertThat(record.maskedCardNumber()).isEqualTo("**** **** **** 8877");
-    assertThat(record.cardNumberLastFour()).isEqualTo("8877");
+    assertThat(record.lastFour()).isEqualTo("8877");
   }
 }

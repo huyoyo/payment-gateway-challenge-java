@@ -6,7 +6,6 @@ import com.checkout.payment.gateway.app.payment.api.generated.model.CardSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.CreatePaymentRequest;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentProcessing;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
-import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentStatus;
 import com.checkout.payment.gateway.app.payment.api.generated.model.Source;
 import com.checkout.payment.gateway.connector.api.PaymentOutcome;
@@ -40,11 +39,10 @@ public class PaymentResponseBuilder {
    * Adds the masked card number to a stored response in place.
    */
   public PaymentResponse withMaskedNumber(PaymentResponse response, String maskedCardNumber,
-      String cardNumberLastFour) {
-    PaymentSource source = response.getSource();
-    if (source != null) {
+      String lastFour) {
+    if (response.getSource() instanceof CardSource source) {
       source.setNumber(maskedCardNumber);
-      source.setCardNumberLastFour(cardNumberLastFour);
+      source.setLastFour(lastFour);
     }
     return response;
   }
@@ -53,19 +51,18 @@ public class PaymentResponseBuilder {
    * Removes a masked card number added by a previous GET, for POST replay.
    */
   public PaymentResponse withoutCardNumber(PaymentResponse response) {
-    if (response.getSource() != null) {
-      response.getSource().setNumber(null);
+    if (response.getSource() instanceof CardSource source) {
+      source.setNumber(null);
     }
     return response;
   }
 
-  private static PaymentSource source(Source requestSource) {
-    PaymentSource responseSource = new PaymentSource();
+  private static Source source(Source requestSource) {
+    CardSource responseSource = new CardSource();
     if (requestSource instanceof CardSource card) {
-      responseSource.setType(PaymentSource.TypeEnum.CREDIT_CARD);
+      responseSource.setType("CREDIT_CARD");
       responseSource.setBrand(card.getBrand());
-      String lastFour = lastFour(card.getNumber());
-      responseSource.setCardNumberLastFour(lastFour);
+      responseSource.setLastFour(lastFour(card.getNumber()));
       responseSource.setExpiryMonth(card.getExpiryMonth());
       responseSource.setExpiryYear(card.getExpiryYear());
     }

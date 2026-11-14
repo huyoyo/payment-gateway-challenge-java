@@ -41,7 +41,10 @@ class PaymentsConnectorRegistryTest {
   }
 
   @Test
-  void rejectsEmptyConnectorList() {
+  void rejectsNullAndEmptyConnectorLists() {
+    assertThatThrownBy(() -> new PaymentsConnectorRegistry(null))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("No IPaymentProcessor connectors");
     assertThatThrownBy(() -> new PaymentsConnectorRegistry(List.of()))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("No IPaymentProcessor connectors");

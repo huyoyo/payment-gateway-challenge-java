@@ -4,8 +4,6 @@ import com.checkout.payment.gateway.app.payment.api.generated.model.CardProcessi
 import com.checkout.payment.gateway.app.payment.api.generated.model.CardSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.CreatePaymentRequest;
 import com.checkout.payment.gateway.app.payment.api.generated.model.Source;
-import com.checkout.payment.gateway.app.payment.api.generated.model.WalletProcessing;
-import com.checkout.payment.gateway.app.payment.api.generated.model.WalletSource;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -41,13 +39,8 @@ public class PaymentRequestFingerprint {
     if (source instanceof CardSource card) {
       return String.join("|", "card", hash(card.getNumber()),
           value(card.getExpiryMonth()), value(card.getExpiryYear()), hash(card.getCvv()),
-          value(card.getBrand()), value(card.getName()), value(card.getBillingAddress()),
-          value(card.getPhone()), value(card.getAccountHolder()));
-    }
-    if (source instanceof WalletSource wallet) {
-      return String.join("|", "wallet", hash(wallet.getToken()),
-          value(wallet.getWalletType()), value(wallet.getBillingAddress()),
-          value(wallet.getPhone()));
+          value(card.getBrand()), value(card.getName()), value(card.getLastFour()),
+          value(card.getBillingAddress()), value(card.getAccountHolder()));
     }
     return "unknown";
   }
@@ -59,8 +52,6 @@ public class PaymentRequestFingerprint {
     String processing = "";
     if (request.getPaymentContext().getProcessing() instanceof CardProcessing card) {
       processing = String.join("|", value(card.getSchema()), value(card.getRoutingNetwork()));
-    } else if (request.getPaymentContext().getProcessing() instanceof WalletProcessing wallet) {
-      processing = String.join("|", value(wallet.getSchema()), value(wallet.getWalletType()));
     }
     return String.join("|", value(request.getPaymentContext().getCaptureMode()),
         value(request.getPaymentContext().getTransactionInitiatorType()), processing);

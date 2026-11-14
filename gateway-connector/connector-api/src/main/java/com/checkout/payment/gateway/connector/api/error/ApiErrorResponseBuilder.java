@@ -18,19 +18,24 @@ public class ApiErrorResponseBuilder {
   private static final Logger LOG = LoggerFactory.getLogger(ApiErrorResponseBuilder.class);
 
   public ApiErrorResponse rejected(String message, List<ApiFieldError> errors) {
-    return build("PAYMENT_REJECTED", message, errors);
+    return build("Rejected", "PAYMENT_REJECTED", message, errors);
   }
 
   public ApiErrorResponse error(String code, String message) {
-    return build(code, message, List.of());
+    return build("Rejected", code, message, List.of());
   }
 
-  private ApiErrorResponse build(String code, String message, List<ApiFieldError> errors) {
+  public ApiErrorResponse unknown(String code, String message) {
+    return build("Unknown", code, message, List.of());
+  }
+
+  private ApiErrorResponse build(String status, String code, String message,
+      List<ApiFieldError> errors) {
     UUID errorId = UUID.randomUUID();
-    LOG.info("Created error response id={} code={}", errorId, code);
+    LOG.info("Created error response id={} status={} code={}", errorId, status, code);
     return new ApiErrorResponse(
         errorId,
-        "Rejected",
+        status,
         OffsetDateTime.now(ZoneOffset.UTC),
         code,
         message,

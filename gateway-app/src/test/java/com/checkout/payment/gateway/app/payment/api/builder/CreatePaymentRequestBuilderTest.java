@@ -2,12 +2,13 @@ package com.checkout.payment.gateway.app.payment.api.builder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import com.checkout.payment.gateway.app.payment.api.generated.model.Amount;
 import com.checkout.payment.gateway.app.payment.api.generated.model.BankId;
 import com.checkout.payment.gateway.app.payment.api.generated.model.CardSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.CreatePaymentRequest;
-import com.checkout.payment.gateway.app.payment.api.generated.model.WalletSource;
+import com.checkout.payment.gateway.app.payment.api.generated.model.Source;
 import com.checkout.payment.gateway.connector.api.PaymentCommand;
 import com.checkout.payment.gateway.connector.api.error.PaymentRejectedException;
 import java.time.YearMonth;
@@ -18,9 +19,9 @@ class CreatePaymentRequestBuilderTest {
   private final CreatePaymentRequestBuilder builder = new CreatePaymentRequestBuilder();
 
   @Test
-  void buildsConnectorCommandFromCardSource() {
+  void buildsConnectorCommandAndNormalizesCardAndCurrency() {
     CreatePaymentRequest request = request(new CardSource("CREDIT_CARD",
-        "2222405343248877", 12, 2099, "123"), new Amount(100, "GBP"));
+        " 2222405343248877 ", 12, 2099, "123"), new Amount(100, " gbp "));
 
     PaymentCommand command = builder.build(request);
 
@@ -32,10 +33,16 @@ class CreatePaymentRequestBuilderTest {
   }
 
   @Test
-  void rejectsWalletSourceBecauseBankSimulatorIsCardOnly() {
-    CreatePaymentRequest request = request(
-        new WalletSource("WALLET", "wallet-token"), new Amount(100, "GBP"));
+  void rejectsMissingSource() {
+    assertRejected(request(null, new Amount(100, "GBP")));
+  }
 
+  @Test
+  void rejectsUnknownSourceImplementation() {
+    assertRejected(request(mock(Source.class), new Amount(100, "GBP")));
+  }
+
+  private void assertRejected(CreatePaymentRequest request) {
     assertThatThrownBy(() -> builder.build(request))
         .isInstanceOf(PaymentRejectedException.class)
         .satisfies(exception -> assertThat(
@@ -44,8 +51,7 @@ class CreatePaymentRequestBuilderTest {
             .satisfies(error -> assertThat(error.field()).isEqualTo("source.type")));
   }
 
-  private static CreatePaymentRequest request(
-      com.checkout.payment.gateway.app.payment.api.generated.model.Source source, Amount amount) {
+  private static CreatePaymentRequest request(Source source, Amount amount) {
     CreatePaymentRequest request = new CreatePaymentRequest();
     request.setBankId(BankId.BANK_SIMULATOR);
     request.setSource(source);

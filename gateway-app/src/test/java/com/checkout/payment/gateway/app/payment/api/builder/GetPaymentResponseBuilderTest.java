@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.checkout.payment.gateway.app.payment.api.generated.model.Amount;
 import com.checkout.payment.gateway.app.payment.api.generated.model.BankId;
+import com.checkout.payment.gateway.app.payment.api.generated.model.CardSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentProcessing;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
-import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentStatus;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentRecord;
 import java.time.OffsetDateTime;
@@ -31,12 +31,9 @@ class GetPaymentResponseBuilderTest {
     PaymentProcessing processing = new PaymentProcessing();
     processing.setAuthCode("auth-123");
     stored.setProcessing(processing);
-    PaymentSource source = new PaymentSource();
-    source.setType(PaymentSource.TypeEnum.CREDIT_CARD);
+    CardSource source = new CardSource("CREDIT_CARD", "2222405343248877", 12, 2099, "123");
     source.setBrand("VISA");
-    source.setCardNumberLastFour("8877");
-    source.setExpiryMonth(12);
-    source.setExpiryYear(2099);
+    source.setLastFour("8877");
     stored.setSource(source);
 
     PaymentResponse response = builder.build(new PaymentRecord(
@@ -45,7 +42,13 @@ class GetPaymentResponseBuilderTest {
     assertThat(response).isSameAs(stored);
     assertThat(response.getAmount()).isSameAs(amount);
     assertThat(response.getProcessing()).isSameAs(processing);
-    assertThat(response.getSource().getNumber()).isEqualTo("**** **** **** 8877");
-    assertThat(response.getSource().getCardNumberLastFour()).isEqualTo("8877");
+    assertThat(source.getNumber()).isEqualTo("**** **** **** 8877");
+    assertThat(source.getLastFour()).isEqualTo("8877");
+  }
+
+  @Test
+  void toleratesMissingSource() {
+    PaymentResponse stored = new PaymentResponse();
+    assertThat(builder.build(new PaymentRecord(stored, "mask", "1234"))).isSameAs(stored);
   }
 }

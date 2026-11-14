@@ -30,6 +30,35 @@ class CardDataProtectorTest {
   }
 
   @Test
+  void rejectsNullInputsInvalidBase64AndShortPayloads() {
+    UUID id = UUID.randomUUID();
+    assertThatThrownBy(() -> crypto.encrypt(null, "123"))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> crypto.encrypt(id, null))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> crypto.decrypt(null, "payload"))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> crypto.decrypt(id, null))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> crypto.decrypt(id, "not-base64!"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("base64");
+    assertThatThrownBy(() -> crypto.decrypt(id, "c2hvcnQ="))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("too short");
+  }
+
+  @Test
+  void rejectsTamperedCiphertext() {
+    UUID id = UUID.randomUUID();
+    String encrypted = crypto.encrypt(id, "2222405343248877");
+    String tampered = encrypted.substring(0, encrypted.length() - 2) + "AA";
+
+    assertThatThrownBy(() -> crypto.decrypt(id, tampered))
+        .isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
   void usesAnIndependentInMemoryKeyForEachServiceInstance() {
     UUID paymentId = UUID.randomUUID();
     String encrypted = crypto.encrypt(paymentId, "123");

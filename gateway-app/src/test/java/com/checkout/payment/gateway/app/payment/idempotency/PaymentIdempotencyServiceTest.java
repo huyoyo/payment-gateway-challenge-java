@@ -4,15 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
+import com.checkout.payment.gateway.app.payment.observability.PaymentMetrics;
 import com.checkout.payment.gateway.connector.api.BankUnavailableException;
 import com.checkout.payment.gateway.connector.api.error.IdempotencyKeyReusedException;
 import com.checkout.payment.gateway.connector.api.error.PaymentRequestInProgressException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class PaymentIdempotencyServiceTest {
 
-  private final PaymentIdempotencyService service = new PaymentIdempotencyService();
+  private final PaymentIdempotencyService service = new PaymentIdempotencyService(
+      new PaymentMetrics(new SimpleMeterRegistry()));
   private final UUID requestKey = UUID.randomUUID();
 
   @Test
@@ -42,6 +45,33 @@ class PaymentIdempotencyServiceTest {
 
     assertThatThrownBy(() -> service.start(requestKey, "fingerprint"))
         .isSameAs(failure);
+  }
+
+  @Test
+  void completeAndFailWithoutReservationAreNoOps() {
+    PaymentResponse payment = payment();
+    service.complete(requestKey, payment);
+    service.fail(requestKey, new BankUnavailableException("timeout", null));
+
+    assertThat(service.start(requestKey, "fingerprint")).isEmpty();
+  }
+
+  @Test
+  void completedResultIsNotOverwrittenByLaterCompleteOrFail() {
+    PaymentResponse first = payment();
+    PaymentResponse second = payment();
+    service.start(requestKey, "fingerprint");
+    service.complete(requestKey, first);
+    service.complete(requestKey, second);
+    service.fail(requestKey, new BankUnavailableException("timeout", null));
+
+    assertThat(service.start(requestKey, "fingerprint")).containsSame(first);
+  }
+
+  private static PaymentResponse payment() {
+    PaymentResponse payment = new PaymentResponse();
+    payment.setId(UUID.randomUUID());
+    return payment;
   }
 
   @Test

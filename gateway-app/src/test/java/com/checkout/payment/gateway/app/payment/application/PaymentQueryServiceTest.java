@@ -6,8 +6,8 @@ import static org.mockito.Mockito.when;
 
 import com.checkout.payment.gateway.app.payment.api.builder.GetPaymentResponseBuilder;
 import com.checkout.payment.gateway.app.payment.api.builder.PaymentResponseBuilder;
+import com.checkout.payment.gateway.app.payment.api.generated.model.CardSource;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
-import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentSource;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentRecord;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentRepository;
 import com.checkout.payment.gateway.connector.api.error.PaymentNotFoundException;
@@ -38,16 +38,16 @@ class PaymentQueryServiceTest {
     UUID id = UUID.randomUUID();
     PaymentResponse stored = new PaymentResponse();
     stored.setId(id);
-    PaymentSource source = new PaymentSource();
-    source.setCardNumberLastFour("8877");
+    CardSource source = new CardSource("CREDIT_CARD", "2222405343248877", 12, 2099, "123");
+    source.setLastFour("8877");
     stored.setSource(source);
     when(paymentRepository.findById(id))
         .thenReturn(Optional.of(new PaymentRecord(stored, "**** **** **** 8877", "8877")));
 
     PaymentResponse response = paymentQueryService.getPayment(id);
 
-    assertThat(response.getSource().getNumber()).isEqualTo("**** **** **** 8877");
-    assertThat(response.getSource().getCardNumberLastFour()).isEqualTo("8877");
+    assertThat(source.getNumber()).isEqualTo("**** **** **** 8877");
+    assertThat(source.getLastFour()).isEqualTo("8877");
   }
 
   @Test

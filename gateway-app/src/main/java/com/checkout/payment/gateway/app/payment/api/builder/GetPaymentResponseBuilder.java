@@ -23,6 +23,6 @@ public class GetPaymentResponseBuilder {
    */
   public PaymentResponse build(PaymentRecord record) {
     return responseBuilder.withMaskedNumber(
-        record.payment(), record.maskedCardNumber(), record.cardNumberLastFour());
+        record.payment(), record.maskedCardNumber(), record.lastFour());
   }
 }

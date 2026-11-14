@@ -25,7 +25,7 @@ public class CreatePaymentRequestBuilder {
   public PaymentCommand build(CreatePaymentRequest request) {
     if (!(request.getSource() instanceof CardSource card)) {
       throw new PaymentRejectedException(List.of(new ValidationError("source.type",
-          "Wallet payments are not supported by bank-simulator")));
+          "must be CREDIT_CARD")));
     }
     return new PaymentCommand(
         card.getNumber().trim(),

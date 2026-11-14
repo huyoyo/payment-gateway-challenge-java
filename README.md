@@ -1,157 +1,38 @@
 # Payment Gateway — Java Take-Home
 
-A Java 17 / Spring Boot 3.1.5 payment gateway take-home. I focused on making the payment flow
-traceable, keeping module responsibilities explicit, and showing how idempotency and card-data
-protection fit into a small contract-first service.
+A small, contract-first payment gateway built with Java 17 and Spring Boot 3.1.5. The design
+focuses on safe retries, explicit card-data boundaries, observable payment outcomes and a clean
+separation between the gateway and its bank dependency.
 
 ---
 
 ## At a Glance
 
-- `POST /payments` processes a card payment and returns an authorized or declined result.
+- `POST /payments` returns Authorized or Declined after a bank call.
+- Invalid requests return Rejected without creating a payment or calling the bank.
 - `GET /payment/{id}` retrieves a stored payment.
 - OpenAPI defines the public and bank contracts.
-- `requestKey` makes retries idempotent.
+- `requestKey` provides idempotent retries.
 - CVV is never persisted; PAN is encrypted at rest.
-- POST omits the card number; GET returns a masked card number.
-- Integration tests run under Failsafe with `mvn verify`.
+- POST omits the card number; GET returns a masked number.
+- Micrometer metrics and Actuator health endpoints are exposed.
+- `make verify` runs the full test suite; `make up` runs the Docker Compose stack.
 
 ---
 
-## What I Wanted to Demonstrate
+## Key Contributions
 
-- **Contract-first delivery:** OpenAPI drives the public API models, validation and documentation,
-  reducing drift between the contract and implementation.
-- **Clear boundaries:** the Maven modules separate the web entry point, payment use cases, connector
-  SPI and bank-specific HTTP adapter. Within `gateway-app`, creation, authorization, querying,
-  idempotency, persistence and routing have distinct responsibilities.
-- **Safe retry behavior:** a request key is reserved before external side effects; completed and
-  failed outcomes are replayed, while concurrent duplicates and changed payloads are rejected.
-- **Deliberate handling of sensitive data:** the bank receives a transient payment command; only
-  encrypted PAN is kept in the payment store, and response builders enforce different POST and GET
-  exposure.
-- **Testable integration seams:** the connector SPI supports isolated service tests and a
-  replaceable bank adapter, with unit, connector and end-to-end coverage.
-
----
-
-## Key Design Decisions
-
-### 1. Contract first, generated at build time
-
-The public API is defined in
-[`payment-gateway.yaml`](gateway-app/src/main/resources/openapi/payment-gateway.yaml). The controller
-implements the generated `PaymentsApi`, and request/response models plus Bean Validation are
-generated from the same contract.
-
-This keeps documentation, validation and implementation from drifting apart.
-
-### 2. Feature-shaped packages, bounded services
-
-The application lives under one payment feature:
-
-```text
-app.payment.api
-app.payment.api.builder
-app.payment.application
-app.payment.domain
-app.payment.idempotency
-app.payment.persistence
-app.payment.routing
-```
-
-The original large operation is split by responsibility:
-
-| Service | Responsibility |
-| --- | --- |
-| `PaymentCreationService` | validation, idempotency reservation, creation orchestration |
-| `PaymentAuthorizationService` | bank routing, connector invocation, response creation, persistence |
-| `PaymentQueryService` | lookup and GET mapping |
-
-All beans use constructor injection with `final` fields. There is no field injection.
-
-### 3. Thin controller, explicit use-case services
-
-The controller only adapts HTTP to the generated API:
-
-```text
-POST -> PaymentCreationService
-GET  -> PaymentQueryService
-```
-
-It contains no repository access, business branching, or DTO assembly.
-
-### 4. Idempotency before side effects
-
-`requestKey` is reserved atomically before the bank is called. The state machine distinguishes:
-
-- `IN_PROGRESS`
-- `COMPLETED`
-- `FAILED`
-
-A completed retry replays the stored response. A failed retry replays the terminal failure without
-calling the bank again. A duplicate while the first request is running returns `409`.
-
-The idempotency fingerprint is a compact SHA-256 over canonical fields. PAN, CVV and wallet tokens
-are hashed individually; the full request is not serialized.
-
-### 5. Explicit card-data boundary
-
-Sensitive card data follows one deliberate path:
-
-```text
-PaymentCommand (transient)
-        |
-        v
-PaymentPersistenceMapper
-        |
-        +-- CardDataProtector.encrypt(paymentId, PAN)
-        v
-StoredPayment(payment, encryptedPan)
-        |
-        v
-PaymentRepository
-```
-
-CVV is not part of `StoredPayment`, the repository API, or the read model. It exists only while
-building and sending the bank request.
-
-`CardDataProtector` uses AES-GCM with a random IV and a per-payment key derived from the payment id.
-The master key is in-memory for this exercise; production would use KMS/HSM.
-
-The repository read model returns only:
-
-```text
-PaymentRecord(payment, maskedCardNumber, cardNumberLastFour)
-```
-
-The full PAN does not leave the persistence boundary on GET.
-
-### 6. Different exposure for POST and GET
-
-| Operation | Card data in response |
-| --- | --- |
-| `POST /payments` | brand, last four, expiry; no `source.number` |
-| `GET /payment/{id}` | masked `source.number` plus last four and expiry |
-
-Response mapping is split into:
-
-- `PaymentResponseBuilder` — shared fields;
-- `CreatePaymentResponseBuilder` — POST exposure;
-- `GetPaymentResponseBuilder` — GET exposure.
-
-This makes the security rule visible in the type structure rather than an `if` buried in a mapper.
-
-### 7. Stable connector SPI
-
-`connector-api` owns `IPaymentProcessor`, `PaymentCommand` and `PaymentOutcome`.
-`connector-bank` implements the SPI with a Jersey 2.35 client. The application layer never imports
-the concrete bank connector.
-
-### 8. Test gates that actually run
-
-Unit and slice tests run with Surefire. The multi-layer test is `PaymentGatewayIT` and runs under
-Failsafe during `mvn verify`, so integration tests are not silently skipped.
+| Contribution                        | Why it matters                                                                                                                                                    |
+|-------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **OpenAPI-first API**               | Generated controller/models/validation keep the contract and implementation aligned.                                                                              |
+| **Feature-based modules**           | Payment code is grouped under `payment.api`, `application`, `domain`, `idempotency`, `persistence`, `routing` and `observability`.                                |
+| **Idempotency before side effects** | A `requestKey` is reserved before the bank call; completed, failed and in-progress outcomes are handled explicitly.                                               |
+| **Explicit card-data boundary**     | A transient command is mapped to encrypted storage; CVV never enters the persistence model.                                                                       |
+| **Minimal card-data exposure**      | POST returns no card number; GET returns only the masked number and last four digits.                                                                             |
+| **Connector SPI**                   | The gateway depends on `IPaymentProcessor`, not on the bank implementation.                                                                                       |
+| **Unified bank error handling**     | Bank failures are translated into connector-neutral exceptions and mapped centrally to consistent API errors; controller code never handles bank-specific errors. |
+| **Observable outcomes**             | Payment, latency and idempotency metrics use bounded tags with no card data.                                                                                      |
+| **Test gate**                       | Unit tests plus `PaymentGatewayIT` under Failsafe; `mvn verify` is the real CI entry point.                                                                       |
 
 ---
 
@@ -162,24 +43,17 @@ flowchart LR
     Client["API client"]
     Web["gateway-web<br/>Spring MVC + RequestIdFilter"]
     API["payment.api<br/>PaymentController"]
-    Create["payment.application<br/>PaymentCreationService"]
-    Auth["payment.application<br/>PaymentAuthorizationService"]
+    Creation["payment.application<br/>PaymentCreationService"]
     Query["payment.application<br/>PaymentQueryService"]
-    Idem["payment.idempotency<br/>requestKey state"]
-    Route["payment.routing<br/>Connector registry"]
-    Bank["connector-bank<br/>Jersey client"]
-    Sim["Bank Simulator"]
-    Protect["payment.persistence<br/>CardDataProtector + mapper"]
+    Bank["payment.routing + connector-bank<br/>Jersey client"]
     Store[("Encrypted in-memory<br/>StoredPayment")]
     Contract["OpenAPI contract"]
 
     Client --> Web --> API
-    API --> Create
+    API --> Creation
     API --> Query
-    Create --> Idem
-    Create --> Auth
-    Auth --> Route --> Bank --> Sim
-    Auth --> Protect --> Store
+    Creation --> Bank
+    Creation --> Store
     Query --> Store
     Contract -.->|generates| API
 ```
@@ -188,132 +62,112 @@ flowchart LR
 
 | Module | Responsibility |
 | --- | --- |
-| `gateway-web` | Boot application, web filters, Swagger/Actuator |
-| `gateway-app` | Payment feature: API, application, domain, persistence |
-| `connector-api` | Stable SPI and shared error envelope |
+| `gateway-web` | Boot entry point, filters, Swagger and Actuator |
+| `gateway-app` | Payment feature: API, application, persistence, routing |
+| `connector-api` | Stable connector SPI and shared error model |
 | `connector-bank` | Bank simulator adapter |
 
 ---
 
-## End-to-End Flows
-
-### Processing a payment
-
-```mermaid
-sequenceDiagram
-autonumber
-participant C as Client
-participant Ctl as PaymentController
-participant Advice as GlobalExceptionHandler
-participant Creation as PaymentCreationService
-participant I as Idempotency
-participant Auth as PaymentAuthorizationService
-participant Bank as Connector
-participant Map as PersistenceMapper
-participant Repo as Repository
-
-C->>Ctl: POST /payments, requestKey
-Ctl->>Creation: perform request
-Creation->>Creation: validate, build command and fingerprint
-Creation->>I: start requestKey, fingerprint
-
-alt completed request
-    I-->>Creation: stored PaymentResponse
-    Creation->>Auth: normalize replay
-    Auth-->>Creation: POST response
-    Creation-->>Ctl: PaymentResponse
-    Ctl-->>C: 201 Created, same payment id
-else not completed
-    alt duplicate or previously failed request
-        I-->>Creation: throw in-progress, key-reused, or stored failure
-        Creation-->>Ctl: exception
-        Ctl-->>Advice: handle exception
-        Advice-->>C: mapped 409 or terminal error
-    else new request
-        I-->>Creation: key reserved
-        Creation->>Auth: authorize request, command
-        alt authorization succeeds
-            Auth->>Bank: performPayments command
-            Bank-->>Auth: PaymentOutcome
-            Auth->>Map: map to stored payment
-            Map-->>Auth: StoredPayment, encrypted PAN
-            Auth->>Repo: save stored payment
-            Auth-->>Creation: PaymentResponse
-            Creation->>I: complete requestKey, payment
-            I-->>Creation: completed
-            Creation-->>Ctl: PaymentResponse
-            Ctl-->>C: 201 Created, authorized or declined
-        else authorization throws
-            Auth-->>Creation: RuntimeException
-            Creation->>I: fail requestKey, exception
-            I-->>Creation: failure stored
-            Creation-->>Ctl: exception
-            Ctl-->>Advice: handle exception
-            Advice-->>C: mapped error response
-        end
-    end
-end
-```
-
-### Retrieving a payment’s details
+## Payment Flow
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Client
     participant Ctl as PaymentController
-    participant Query as PaymentQueryService
-    participant Repo as Repository
-    participant Map as PersistenceMapper
-    participant Builder as GetResponseBuilder
+    participant Creation as PaymentCreationService
+    participant I as Idempotency
+    participant Auth as PaymentAuthorizationService
+    participant Bank as Connector
+    participant Store as Encrypted store
 
-    C->>Ctl: GET /payment/{id}
-    Ctl->>Query: getPayment(id)
-    Query->>Repo: findById(id)
-    Repo->>Map: toRecord(stored)
-    Map->>Map: decrypt PAN, derive last four
-    Map-->>Repo: PaymentRecord(masked, lastFour)
-    Repo-->>Query: PaymentRecord
-    Query->>Builder: build(record)
-    Builder-->>C: 200 with source.number = **** **** **** 1234
+    C->>Ctl: POST /payments + requestKey
+    Ctl->>Creation: perform(request)
+    Creation->>I: start(requestKey, fingerprint)
+    alt completed
+        I-->>Creation: stored response
+        Creation-->>C: replay with same payment id
+    else in progress
+        I-->>Creation: conflict
+        Creation-->>C: 409 REQUEST_IN_PROGRESS
+    else new request
+        Creation->>Auth: authorize(request, command)
+        Auth->>Bank: performPayments(command)
+        Bank-->>Auth: PaymentOutcome
+        Auth->>Store: save encrypted PAN
+        Auth-->>Creation: PaymentResponse
+        Creation->>I: complete
+        Creation-->>C: 201 Authorized / Declined
+    end
 ```
 
-### Idempotency states
+Key rules:
 
-```mermaid
-stateDiagram-v2
-    [*] --> IN_PROGRESS: new requestKey
-    IN_PROGRESS --> COMPLETED: bank outcome persisted
-    IN_PROGRESS --> FAILED: terminal exception
-    COMPLETED --> COMPLETED: replay stored response
-    FAILED --> FAILED: replay terminal failure
-    IN_PROGRESS --> IN_PROGRESS: duplicate -> 409
-```
-
-### Card-data protection
-
-```mermaid
-flowchart LR
-    Cmd["PaymentCommand<br/>PAN + CVV (transient)"]
-    Mapper["PaymentPersistenceMapper"]
-    Key["HMAC-SHA256(masterKey, paymentId)"]
-    AES["AES-GCM + random IV"]
-    Store[("StoredPayment<br/>encryptedPan only")]
-    Read["GET read path"]
-    Mask["maskedCardNumber + lastFour"]
-
-    Cmd --> Mapper
-    Mapper --> Key --> AES
-    Mapper --> AES
-    AES --> Store
-    Store --> Read --> Mask
-```
+- Same key + same payload + completed → replay.
+- Same key + same payload + failed → replay terminal failure.
+- Same key + different payload → `409`.
+- Same key + request still running → `409`.
+- The fingerprint is a compact SHA-256 over canonical fields; the full request is not serialized.
 
 ---
 
 ## API Surface
 
-### Request
+| Method | Path            | Result                       |
+|--------|-----------------|------------------------------|
+| `POST` | `/payments`     | `201` Authorized or Declined |
+| `GET`  | `/payment/{id}` | `200` payment or `404`       |
+
+Required create fields:
+
+- `requestKey`: UUID idempotency key;
+- `bankId`: `bank-simulator`;
+- `source`: card details;
+- `amount`: positive integer minor units with `GBP`, `USD` or `EUR`.
+
+Card-data exposure:
+
+| Operation | `source.number` |
+| --- | --- |
+| `POST /payments` | omitted |
+| `GET /payment/{id}` | `**** **** **** 1234` |
+
+### Payment outcomes
+
+| Outcome        | Meaning                                                                                                                                    | Bank called | Payment stored |
+|----------------|--------------------------------------------------------------------------------------------------------------------------------------------|-------------|----------------|
+| **Authorized** | Acquiring bank authorized the payment.                                                                                                     | Yes         | Yes            |
+| **Declined**   | Acquiring bank declined the payment.                                                                                                       | Yes         | Yes            |
+| **Rejected**   | Invalid information was supplied, so no payment was created and the bank was not called.                                                   | No          | No             |
+| **Unknown**    | The gateway cannot determine a definitive payment outcome; the bank may or may not have been called, and the payment may or may not exist. | Unknown     | Unknown        |
+
+`Rejected` is a payment-creation outcome for invalid input. `Unknown` is an operational status for
+ambiguous bank outcomes; it is not a successful or declined payment. `GET /payment/{id}` only
+returns stored Authorized or Declined payments.
+
+### Error code mapping
+
+All error responses use the shared envelope with `id`, `status`, `code`, `message` and field errors.
+The `code`, HTTP status and envelope status identify the actual failure:
+
+| HTTP  | Code                         | Envelope status | When                                               | Bank called | Payment stored |
+|-------|------------------------------|-----------------|----------------------------------------------------|-------------|----------------|
+| `400` | `PAYMENT_REJECTED`           | `Rejected`      | Validation or expiry/source rejection              | No          | No             |
+| `400` | `INVALID_REQUEST`            | `Rejected`      | Malformed JSON, wrong type, invalid path parameter | No          | No             |
+| `400` | `UNSUPPORTED_BANK`           | `Rejected`      | Requested bank id is not configured                | No          | No             |
+| `404` | `PAYMENT_NOT_FOUND`          | `Rejected`      | Lookup id does not exist                           | No          | No             |
+| `405` | `METHOD_NOT_ALLOWED`         | `Rejected`      | Unsupported HTTP method                            | No          | No             |
+| `409` | `IDEMPOTENCY_KEY_REUSED`     | `Rejected`      | Same requestKey with a different payload           | No new call | No             |
+| `409` | `REQUEST_IN_PROGRESS`        | `Rejected`      | Duplicate requestKey while the original is running | No new call | No             |
+| `415` | `UNSUPPORTED_MEDIA_TYPE`     | `Rejected`      | Non-JSON content type                              | No          | No             |
+| `500` | `INTERNAL_ERROR`             | `Unknown`       | Unexpected gateway failure                         | Unknown     | Unknown        |
+| `502` | `ACQUIRING_BANK_ERROR`       | `Unknown`       | Bank rejected or returned an unreadable response   | Yes         | No             |
+| `503` | `ACQUIRING_BANK_UNAVAILABLE` | `Unknown`       | Bank 5xx, timeout or unavailable                   | Yes/unknown | No             |
+
+### Rejected error example
+
+Invalid CVV:
 
 ```json
 {
@@ -321,132 +175,168 @@ flowchart LR
   "bankId": "bank-simulator",
   "source": {
     "type": "CREDIT_CARD",
-    "brand": "VISA",
-    "number": "4543474002249996",
+    "number": "2222405343248877",
     "expiryMonth": 6,
     "expiryYear": 2030,
-    "cvv": "956"
+    "cvv": "12"
   },
-  "amount": { "value": 6540, "currency": "USD" }
+  "amount": { "value": 100, "currency": "GBP" }
 }
 ```
 
-- `source.type`: `CREDIT_CARD` or `WALLET`
-- `amount.currency`: `GBP`, `USD`, `EUR`
-- `requestKey` is mandatory
-
-### POST response
+The gateway responds with HTTP `400`:
 
 ```json
 {
-  "id": "8f14e45f-ceea-467a-9d0b-1c0a7c3a9e21",
-  "amount": { "value": 6540, "currency": "USD" },
-  "bankId": "bank-simulator",
-  "status": "Authorized",
-  "source": {
-    "type": "CREDIT_CARD",
-    "brand": "VISA",
-    "cardNumberLastFour": "9996",
-    "expiryMonth": 6,
-    "expiryYear": 2030
-  },
-  "processedOn": "2026-11-13T08:00:00Z",
-  "processing": { "authCode": "auth-123" }
+  "id": "b4b7a4c2-6e4d-4e0b-9e9e-4f5c3a2b1d00",
+  "status": "Rejected",
+  "timestamp": "2026-11-14T08:00:00Z",
+  "code": "PAYMENT_REJECTED",
+  "message": "Payment request validation failed",
+  "errors": [
+    {
+      "field": "source.cvv",
+      "message": "must match \"^[0-9]{3,4}$\""
+    }
+  ]
 }
 ```
 
-### GET response
+No bank call is made and no payment is stored.
 
-```json
-{
-  "id": "8f14e45f-ceea-467a-9d0b-1c0a7c3a9e21",
-  "amount": { "value": 6540, "currency": "USD" },
-  "bankId": "bank-simulator",
-  "status": "Authorized",
-  "source": {
-    "type": "CREDIT_CARD",
-    "number": "**** **** **** 9996",
-    "cardNumberLastFour": "9996",
-    "expiryMonth": 6,
-    "expiryYear": 2030
-  },
-  "processedOn": "2026-11-13T08:00:00Z",
-  "processing": { "authCode": "auth-123" }
-}
+The error envelope uses `Rejected` for validation, request and idempotency errors.
+`500 INTERNAL_ERROR`, `502 ACQUIRING_BANK_ERROR` and `503 ACQUIRING_BANK_UNAVAILABLE` use `Unknown`:
+This is a response-status change, not a complete UNKNOWN lifecycle
+
+---
+
+## Card-Data and Storage Boundary
+
+```text
+PaymentCommand (transient PAN + CVV)
+        │
+        ▼
+PaymentPersistenceMapper
+        ├── CardDataProtector.encrypt(paymentId, PAN)
+        ▼
+StoredPayment(payment, encryptedPan)
+        │
+        ▼
+PaymentRepository
 ```
 
-Errors use the shared envelope with `id`, `status: Rejected`, `code`, `message` and field errors.
+- CVV is not part of `StoredPayment`, the repository API or the GET read model.
+- AES-GCM uses a random IV and a payment-specific key derived from the payment id.
+- GET decrypts PAN only inside the persistence boundary and returns masked data.
+- The master key is in-memory for this exercise; production would use KMS/HSM.
+- The public contract currently models card payments only.
+
+---
+
+## Observability
+
+Implemented with Micrometer and Actuator:
+
+- `payments.created` — status and bank;
+- `payment.authorization.duration` — status and bank;
+- `payment.idempotency.replays` — outcome;
+- `payment.idempotency.conflicts` — reason.
+
+Endpoints:
+
+```text
+/actuator/health
+/actuator/health/liveness
+/actuator/health/readiness
+/actuator/metrics
+/actuator/prometheus
+```
+
+Tags are deliberately bounded. Card numbers, CVV, request keys and customer data are never metric
+tags.
+
+---
+
+## Packaging and Hosting
+
+### Packaging
+
+- `spring-boot-maven-plugin` produces an executable fat jar.
+- `Dockerfile` uses a Maven build stage and an `eclipse-temurin:17-jre` runtime stage.
+- The runtime image starts `/app.jar` with:
+
+```dockerfile
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+```
+
+- The bank simulator is **not** packaged into the gateway image.
+
+### Local hosting
+
+```bash
+make up
+```
+
+This builds the gateway image, starts both services and waits for gateway readiness.
+
+| Service        | Compose name     | Host access             |
+|----------------|------------------|-------------------------|
+| Gateway        | `gateway`        | `http://localhost:8081` |
+| Bank simulator | `bank-simulator` | `http://localhost:8080` |
+
+Inside Compose, the gateway reaches the bank at `http://bank-simulator:8080`. Configuration is
+injected with `SERVER_PORT` and `BANK_BASE_URL`; the image does not hard-code environment addresses.
+
+```bash
+make logs   # follow gateway + bank logs
+make down   # stop the stack
+```
+
+Health output is available at `/actuator/health`; logs are written to stdout/stderr. Production would
+replace Compose with a managed container platform while keeping the same health and logging contract.
 
 ---
 
 ## Assumptions and Boundaries
 
-This is a local, single-process take-home implementation, not a production payment service. The
-assumptions below define what this implementation promises and where it deliberately stops.
+### In scope
 
-### Assumptions
-
-- `requestKey` identifies one logical payment. A client reuses it only for an equivalent retry;
-  reusing it with a different request fingerprint returns a conflict.
-- Amounts are positive integer minor units, and the supported currencies are GBP, USD and EUR.
-- Authorization is synchronous: the configured simulator returns an authorized or declined
-  outcome. There is no pending/unknown payment state.
-- The public contract describes both card and wallet sources, but the configured bank connector
-  supports card payments only; wallet requests are rejected by the application.
-- A process-local store and encryption key are acceptable for demonstrating the flow, but provide
-  neither durability nor cross-instance consistency.
-
-### Included boundary
-
-- `POST /payments` validates and processes a payment; `GET /payment/{id}` retrieves it.
-- One configured bank simulator is selected through the connector SPI and fail-fast registry.
-- The payment store keeps the response payload and encrypted PAN. CVV is transient and never
-  persisted.
-- POST responses omit the card number; GET responses add only a masked number and last four digits.
-- Validation and unexpected failures use a shared API error envelope; `X-Request-Id` supports
-  request correlation.
+- Two endpoints: create and lookup.
+- OpenAPI-first card API.
+- Idempotent retries via `requestKey`.
+- Encrypted PAN at rest; CVV never persisted.
+- Micrometer/Actuator observability.
+- Local Docker Compose hosting.
 
 ### Deliberately out of scope
 
-- Authentication, authorization, tenant isolation and rate limiting.
-- Durable payment or idempotency storage, database transactions and an outbox.
-- Bank-side idempotency, reconciliation and recovery of ambiguous timeouts.
-- Full PCI certification, KMS/HSM integration and key rotation.
+- Authentication, tenant isolation and rate limiting.
+- Durable payments or idempotency storage.
+- Database transactions, outbox and reconciliation.
+- KMS/HSM key management and key rotation.
 - 3DS, capture, refund, void, webhooks and settlement.
 - Multi-instance deployment.
 
-### Known trade-offs
+### Known risks
 
-- A restart loses payments and idempotency records; the in-memory encryption key is also process
-  scoped.
-- The generated API response DTO is reused as the in-memory persistence payload. GET enriches that
-  response with a masked number, so POST replay explicitly removes it again.
-- A bank timeout can leave the actual authorization outcome unknown; the current model records a
-  terminal failure and has no reconciliation path.
-- There is no authentication or tenant ownership, so this service must not be exposed as-is.
+- Payments and idempotency are in-memory; restart loses them.
+- The encryption master key is process-local.
+- `PaymentResponse` is still used as the in-memory persistence payload.
+- The API must not be exposed publicly without authentication.
 
 ---
 
-## Testing Strategy
+## Testing
 
-```mermaid
-flowchart TB
-    Unit["Unit / slice tests<br/>validation, services, builders, idempotency, crypto"]
-    Connector["Connector tests<br/>Jersey + generated bank POJOs + JDK HttpServer"]
-    IT["PaymentGatewayIT<br/>Spring Boot + MockMvc + in-process bank"]
-    Manual["Manual E2E<br/>Docker bank simulator"]
-
-    Unit --> Connector --> IT --> Manual
-```
-
-### Current result
-
-- **82 tests**
-  - `gateway-app`: 39 unit tests
-  - `connector-bank`: 15 tests
-  - `PaymentGatewayIT`: 28 integration tests
+- **120 tests**: 92 unit tests and 28 integration tests.
+- `gateway-app`: 57, `connector-api`: 10, `connector-bank`: 20, `gateway-web`: 5.
+- `PaymentGatewayIT`: 28.
+- Branch-focused tests cover response exposure, idempotency states, validation, encryption failures,
+  connector routing, error handling, metrics tags and configuration.
 
 ```bash
+make verify
+# or
 ./mvnw clean verify
 ```
 
@@ -456,77 +346,55 @@ flowchart TB
 
 ## Running Locally
 
-### Prerequisites
-
-- JDK 17
-- Docker for the bank simulator
-
-### Start
-
 ```bash
-docker compose up -d
-./mvnw clean verify
-./mvnw -pl gateway-web -am spring-boot:run
+make verify   # full build + unit + integration tests, no Docker
+make run      # local jar + bank simulator, gateway on :8090
+make up       # gateway + bank via Docker Compose, gateway on :8081
+make down     # stop the Compose stack
 ```
 
-Gateway: `http://localhost:8090`
-Swagger UI: `http://localhost:8090/swagger-ui/index.html`
-
-### Example
+`make run` waits up to 60 seconds for the bank simulator. Override when needed:
 
 ```bash
-curl -i -X POST http://localhost:8090/payments \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "requestKey": "8f14e45f-ceea-467a-9d0b-1c0a7c3a9e21",
-    "bankId": "bank-simulator",
-    "source": {
-      "type": "CREDIT_CARD",
-      "brand": "VISA",
-      "number": "2222405343248877",
-      "expiryMonth": 6,
-      "expiryYear": 2030,
-      "cvv": "956"
-    },
-    "amount": { "value": 100, "currency": "GBP" }
-  }'
+make run WAIT_TIMEOUT=120
 ```
-
-### Configuration
-
-| Property | Default | Purpose |
-| --- | --- | --- |
-| `server.port` | `8090` | Gateway port |
-| `connector.bank.simulator.base-url` | `http://localhost:8080` | Bank simulator URL |
-| `connector.bank.simulator.connect-timeout` | `2s` | Jersey connect timeout |
-| `connector.bank.simulator.read-timeout` | `3s` | Jersey read timeout |
 
 ---
 
 ## Future Evolution
 
-1. Replace in-memory storage with PostgreSQL and a durable idempotency table.
-2. Separate API DTOs from domain and persistence models.
-3. Use KMS/HSM for encryption keys and rotation.
-4. Add authentication, merchant scopes, tenant ownership and rate limiting.
-5. Add circuit breakers, bulkheads and bank-specific idempotency.
-6. Model `PENDING`/`UNKNOWN` outcomes and reconciliation.
-7. Add Testcontainers, contract tests and concurrency tests.
-8. Add metrics, tracing and PII-safe audit logs.
+1. **Tenant identity:** accept a tenant/merchant id from an authenticated header or token and scope
+   idempotency to `(tenantId, requestKey)` so different tenants can reuse the same request key
+   without conflicts.
+2. Replace in-memory storage with PostgreSQL and a durable idempotency table.
+3. Separate API DTOs from domain and persistence models.
+4. Add authentication, merchant scopes and rate limiting.
+5. Use KMS/HSM for encryption keys and rotation.
+6. Add circuit breakers and bank-specific idempotency.
+7. Model `PENDING`/`UNKNOWN` outcomes and reconciliation.
+8. Add Testcontainers, contract tests and concurrency tests.
+9. Add distributed tracing and PII-safe audit logs.
 
 ---
 
 ## Project Layout
 
 ```text
-gateway-web/          Boot application, filters, Swagger/Actuator
-gateway-app/          payment feature
-  payment/api         controller + response builders
-  payment/application creation, authorization, query services
-  payment/domain      validation
-  payment/idempotency state machine + fingerprint
-  payment/persistence encrypted store + mapper
-  payment/routing     connector registry
-connector-api/        IPaymentProcessor SPI + errors
-connector-bank/       bank simulator adapter + Jersey client
+Dockerfile             gateway image (fat jar + JRE 17)
+.dockerignore          Docker build exclusions
+Makefile               verify/run/up/down workflow
+docker-compose.yml     gateway + bank simulator local stack
+
+gateway-web/           Boot application, filters, Swagger/Actuator
+gateway-app/           payment feature
+  payment/api          controller + response builders
+  payment/application  creation, authorization, query services
+  payment/domain       validation
+  payment/idempotency  state machine + fingerprint
+  payment/observability metrics
+  payment/persistence  encrypted store + mapper
+  payment/routing      connector registry
+
+connector-api/         IPaymentProcessor SPI + errors
+connector-bank/        bank simulator adapter + Jersey client
 ```

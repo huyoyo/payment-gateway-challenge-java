@@ -4,7 +4,9 @@ import com.checkout.payment.gateway.app.payment.api.generated.model.BankId;
 import com.checkout.payment.gateway.app.payment.api.generated.model.CreatePaymentRequest;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
 import com.checkout.payment.gateway.connector.api.PaymentOutcome;
+import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Component;
 public class CreatePaymentResponseBuilder {
 
   private final PaymentResponseBuilder responseBuilder;
+  private final Clock clock;
 
   /**
    * Builds the POST payment response without a card number field.
@@ -26,12 +29,12 @@ public class CreatePaymentResponseBuilder {
    * @param bankId selected connector
    * @param request public payment request
    * @param outcome acquiring-bank result
-   * @param processedOn processing timestamp
    * @return response for the create operation
    */
   public PaymentResponse build(UUID id, BankId bankId, CreatePaymentRequest request,
-      PaymentOutcome outcome, OffsetDateTime processedOn) {
-    return responseBuilder.build(id, bankId, request, outcome, processedOn);
+      PaymentOutcome outcome) {
+    return responseBuilder.build(id, bankId, request, outcome,
+        OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
   }
 
   /**

@@ -1,6 +1,7 @@
 package com.checkout.payment.gateway.app.payment.idempotency;
 
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
+import com.checkout.payment.gateway.app.payment.observability.PaymentMetrics;
 import com.checkout.payment.gateway.connector.api.error.IdempotencyKeyReusedException;
 import com.checkout.payment.gateway.connector.api.error.PaymentRequestInProgressException;
 import java.util.Map;
@@ -8,6 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /**
@@ -15,9 +17,11 @@ import org.springframework.stereotype.Service;
  * lease/in-progress timeout and unique constraint on requestKey.
  */
 @Service("gateway.app.idempotency.payment-idempotency-service")
+@RequiredArgsConstructor
 public class PaymentIdempotencyService {
 
   private final Map<UUID, IdempotencyRecord> records = new ConcurrentHashMap<>();
+  private final PaymentMetrics paymentMetrics;
 
   /**
    * Atomically reserves the key. Returns the stored payment when the key is already completed.
@@ -31,12 +35,22 @@ public class PaymentIdempotencyService {
       return Optional.empty();
     }
     if (!existing.fingerprint().equals(fingerprint)) {
+      paymentMetrics.idempotencyConflict("fingerprint");
       throw new IdempotencyKeyReusedException(requestKey);
     }
     return switch (existing.status()) {
-      case COMPLETED -> Optional.of(existing.payment());
-      case FAILED -> throw existing.failure();
-      case IN_PROGRESS -> throw new PaymentRequestInProgressException(requestKey);
+      case COMPLETED -> {
+        paymentMetrics.idempotencyReplay("completed");
+        yield Optional.of(existing.payment());
+      }
+      case FAILED -> {
+        paymentMetrics.idempotencyReplay("failed");
+        throw existing.failure();
+      }
+      case IN_PROGRESS -> {
+        paymentMetrics.idempotencyConflict("in_progress");
+        throw new PaymentRequestInProgressException(requestKey);
+      }
     };
   }
 

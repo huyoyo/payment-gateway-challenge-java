@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.m2-repo
+.maven-home
+**/target
+target
+*.iml
+README.md
+docs
+imposters

@@ -4,15 +4,14 @@ import com.checkout.payment.gateway.app.payment.api.builder.CreatePaymentRespons
 import com.checkout.payment.gateway.app.payment.api.generated.model.BankId;
 import com.checkout.payment.gateway.app.payment.api.generated.model.CreatePaymentRequest;
 import com.checkout.payment.gateway.app.payment.api.generated.model.PaymentResponse;
+import com.checkout.payment.gateway.app.payment.observability.PaymentMetrics;
 import com.checkout.payment.gateway.app.payment.routing.PaymentsConnectorRegistry;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentPersistenceMapper;
 import com.checkout.payment.gateway.app.payment.persistence.PaymentRepository;
 import com.checkout.payment.gateway.connector.api.IPaymentProcessor;
 import com.checkout.payment.gateway.connector.api.PaymentCommand;
 import com.checkout.payment.gateway.connector.api.PaymentOutcome;
-import java.time.Clock;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import io.micrometer.core.instrument.Timer;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,7 +27,7 @@ public class PaymentAuthorizationService {
   private final CreatePaymentResponseBuilder responseBuilder;
   private final PaymentRepository paymentRepository;
   private final PaymentPersistenceMapper persistenceMapper;
-  private final Clock clock;
+  private final PaymentMetrics paymentMetrics;
 
   /**
    * Calls the bank and stores an encrypted payment.
@@ -39,13 +38,20 @@ public class PaymentAuthorizationService {
    */
   public PaymentResponse authorize(CreatePaymentRequest request, PaymentCommand command) {
     BankId bankId = request.getBankId();
-    IPaymentProcessor processor = connectorRegistry.get(bankId);
-    PaymentOutcome outcome = processor.performPayments(command);
-    PaymentResponse payment = responseBuilder.build(
-        UUID.randomUUID(), bankId, request, outcome,
-        OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
-    paymentRepository.save(persistenceMapper.toStored(payment, command));
-    return payment;
+    Timer.Sample sample = paymentMetrics.startAuthorization();
+    try {
+      IPaymentProcessor processor = connectorRegistry.get(bankId);
+      PaymentOutcome outcome = processor.performPayments(command);
+      PaymentResponse payment = responseBuilder.build(
+          UUID.randomUUID(), bankId, request, outcome);
+      paymentRepository.save(persistenceMapper.toStored(payment, command));
+      paymentMetrics.paymentCreated(payment);
+      paymentMetrics.authorizationCompleted(sample, bankId, payment.getStatus());
+      return payment;
+    } catch (RuntimeException ex) {
+      paymentMetrics.authorizationCompleted(sample, bankId, null);
+      throw ex;
+    }
   }
 
   /**
